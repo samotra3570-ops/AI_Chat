@@ -1,0 +1,10 @@
+**
+!backend/
+!backend/requirements.lock
+!backend/gateway/
+!backend/gateway/**
+**/.env*
+**/*.key
+**/*.credential
+**/*.sqlite*
+**/__pycache__/
