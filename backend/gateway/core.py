@@ -45,6 +45,8 @@ class GatewayCore:
               access_expires REAL NOT NULL, refresh TEXT UNIQUE NOT NULL, refresh_expires REAL NOT NULL, revoked INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS refresh_history(hash TEXT PRIMARY KEY, family TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS rate(bucket TEXT PRIMARY KEY, count INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS owner_settings(id INTEGER PRIMARY KEY CHECK(id=1),
+              revision INTEGER NOT NULL, budgets TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY, input_hash TEXT NOT NULL, model TEXT NOT NULL,
               room TEXT NOT NULL, character TEXT NOT NULL, status TEXT NOT NULL, created REAL NOT NULL,
               day TEXT NOT NULL, month TEXT NOT NULL, reserved INTEGER NOT NULL, actual INTEGER NOT NULL DEFAULT 0,
@@ -75,6 +77,37 @@ class GatewayCore:
 
     def digest(self, value):
         return hmac.new(self.key, value.encode(), hashlib.sha256).hexdigest()
+
+    def _settings(self, db):
+        row = db.execute('SELECT revision,budgets FROM owner_settings WHERE id=1').fetchone()
+        return {'revision': row['revision'] if row else 0,
+                'budgets': json.loads(row['budgets']) if row else dict(self.config.get('budgets', {}))}
+
+    def settings(self):
+        with self.connection() as db:
+            return self._settings(db)
+
+    def update_settings(self, payload, subject):
+        # All operator-paired sessions belong to this single-owner gateway.
+        fields = {'request_micro_usd', 'day_micro_usd', 'month_micro_usd'}
+        if not isinstance(payload, dict) or set(payload) != {'budgets', 'expected_revision'}:
+            raise GatewayError('invalid_settings')
+        budgets, revision = payload['budgets'], payload['expected_revision']
+        if (type(revision) is not int or revision < 0 or not isinstance(budgets, dict)
+                or set(budgets) != fields or any(type(v) is not int or not 0 <= v <= 1000000000000
+                                               for v in budgets.values())):
+            raise GatewayError('invalid_settings')
+        if all(budgets.values()) and not (budgets['request_micro_usd'] <= budgets['day_micro_usd'] <= budgets['month_micro_usd']):
+            raise GatewayError('budget_order')
+        with self.connection(write=True) as db:
+            current = self._settings(db)
+            if revision != current['revision']:
+                raise GatewayError('settings_conflict', 409)
+            self._rate(db, 'settings', subject, 10, self.clock())
+            updated = {'revision': revision + 1, 'budgets': dict(budgets)}
+            db.execute('INSERT INTO owner_settings VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,budgets=excluded.budgets',
+                       (updated['revision'], canonical(budgets)))
+            return updated
 
     def _rate(self, db, action, subject, limit, now):
         bucket = f"{action}:{self.digest(subject)}:{int(now // 60)}"
@@ -255,7 +288,7 @@ class GatewayCore:
             amount = quote["reserved_micro_usd"]
             if amount > payload.get('approved_micro_usd', amount):
                 raise GatewayError('cost_changed', 409)
-            caps = self.config.get("budgets", {})
+            caps = self._settings(db)['budgets']
             if any(type(caps.get(k)) is not int or caps[k] <= 0 for k in ("day_micro_usd", "month_micro_usd", "request_micro_usd")):
                 raise GatewayError("budget_unconfigured", 503)
             if amount > caps["request_micro_usd"] or totals["day_spent"] + totals["held"] + amount > caps["day_micro_usd"] or totals["month_spent"] + totals["held"] + amount > caps["month_micro_usd"]:
@@ -322,7 +355,7 @@ class GatewayCore:
             totals = self._totals(db, day, month)
             history = [dict(row) for row in db.execute("SELECT id,model,status,created,reserved,actual,usage FROM requests ORDER BY created DESC LIMIT 50")]
             violation = db.execute("SELECT 1 FROM requests WHERE status='billing_limit_violation' LIMIT 1").fetchone() is not None
-        budgets = self.config.get("budgets", {})
+            budgets = self._settings(db)['budgets']
         warnings = []
         for scope in ("day", "month"):
             cap = budgets.get(f"{scope}_micro_usd", 0)

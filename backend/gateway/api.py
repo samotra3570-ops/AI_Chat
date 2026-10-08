@@ -77,8 +77,36 @@ def create_app(core: GatewayCore, provider=None):
     @app.get("/v1/models")
     async def models(request: Request):
         auth(request)
-        return {"models": [{"id": name, "provider": cfg.get("provider", "openai"), "vision": cfg.get("vision") is True, "max_input_tokens": cfg.get("max_input_tokens"), "max_output_tokens": cfg.get("max_output_tokens")} for name, cfg in core.config.get("models", {}).items()
-            if provider is not None and (not hasattr(provider, 'available') or provider.available(name))]}
+        available = []
+        for name, cfg in core.config.get('models', {}).items():
+            if provider is None or (hasattr(provider, 'available') and not provider.available(name)):
+                continue
+            try:
+                price = core._model(name, core.clock())
+                reserved = core.charge(price, price['max_input_tokens'], price['max_output_tokens'])
+                current = True
+            except GatewayError:
+                reserved, current = None, False
+            available.append({'id': name, 'label': cfg.get('label', name),
+                'provider': cfg.get('provider', 'openai'), 'vision': cfg.get('vision') is True,
+                'max_input_tokens': cfg.get('max_input_tokens'), 'max_output_tokens': cfg.get('max_output_tokens'),
+                'price_current': current, 'reserved_micro_usd': reserved,
+                'input_price': cfg.get('input_price'), 'output_price': cfg.get('output_price')})
+        return {'models': available}
+
+    @app.get('/v1/settings')
+    async def settings(request: Request):
+        auth(request)
+        return await asyncio.to_thread(core.settings)
+
+    @app.post('/v1/settings')
+    async def update_settings(request: Request):
+        family = auth(request)
+        try:
+            payload = await request.json()
+        except ValueError:
+            raise GatewayError('invalid_settings')
+        return await asyncio.to_thread(core.update_settings, payload, family)
 
     @app.get("/v1/costs")
     async def costs(request: Request):

@@ -1,5 +1,22 @@
 # GPT·Claude 서버 배포
 
+## 0.3.7 모델·예산 설정
+
+운영 서버는 `https://acm-gateway-production.up.railway.app`이다. 저장소 루트의 Dockerfile과 railway.toml을 사용하며 `/data/acm`의 원장·키를 재사용한다. 아래 초기 배포 설명은 역사적 준비 단계의 기록이다.
+
+앱의 **AI / API → 모델·예산 설정** 또는 **비용과 요청 기록 → 모델·예산 설정**에서 기본 모델과 요청당·하루·월 USD 한도를 저장한다. 기본 모델은 기기의 암호화된 연결 정보에 저장되며, 예산은 인증된 `GET/POST /v1/settings`를 통해 서버 SQLite `owner_settings`에 저장된다. 단일 소유자가 CLI로 발급한 코드로 연결한 모든 기기는 같은 예산을 공유한다. 연결 코드를 다른 사용자에게 배포하는 다중 계정 서비스로 사용하지 않는다.
+
+예산 수정은 원장과 같은 SQLite 쓰기 트랜잭션으로 직렬화된다. `expected_revision`이 다르면 409로 거절해 다른 기기의 변경을 덮어쓰지 않는다. 기존 사용액·불확실한 요청의 예약 비용·가격 스냅샷은 수정하지 않는다. 환경 변수의 초기 예산이 재적용되어도 앱에서 저장한 예산은 유지된다. 0인 한도가 있으면 생성을 차단한다. UTC 기준 일·월 누적에 적용하며, 이 서버 이외의 API 사용과 Railway 호스팅 요금은 포함하지 않는다.
+
+`config.verified-2026-10-09.json`은 공식 문서에서 확인한 GPT-4.1 nano, GPT-4.1 mini, GPT-5.4 mini의 날짜 고정 모델 ID와 Standard 가격이다. 모델을 자동 선택하지 않고 기본 예산은 0으로 둔다. 모델 목록에서 예약 상한과 가격 갱신 상태를 제공한다. 앱은 가격·API 키·서버 허용 모델을 변경할 수 없다. 가격 확인 7일 초과 차단 규칙은 유지한다. 공급자 계정의 모델 접근 권한·결제 상태와 실제 유료 응답은 별도 확인 대상이다.
+
+공식 가격·입출력 지원 근거(2026-10-09 확인):
+
+- https://developers.openai.com/api/docs/models/gpt-4.1-nano
+- https://developers.openai.com/api/docs/models/gpt-4.1-mini
+- https://developers.openai.com/api/docs/models/gpt-5.4-mini
+
+
 이 패키지는 단일 소유자·단일 서버의 SQLite 원장을 유지한다. Railway 계정 연결과 전용 프로젝트·서비스 초안 생성은 확인했다. 공개 서버는 아직 배포하지 않았다. GitHub 소유자/저장소명은 사용자가 지정해야 하며 초안에는 소스·볼륨·실행 설정이 아직 반영되지 않았다. 제공된 Dockerfile의 컨테이너 빌드는 이번 환경에서 미실행이며, Python 실행 진입점과 상태 보존은 테스트로 검증한다.
 
 ## 배포 설정
