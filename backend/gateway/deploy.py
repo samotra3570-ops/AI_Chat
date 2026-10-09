@@ -34,7 +34,8 @@ def configure_runtime():
         config.write_text(json.dumps({'models': {}, 'budgets': {
             'day_micro_usd': 0, 'month_micro_usd': 0, 'request_micro_usd': 0}}))
     os.environ.update(ACM_CONFIG_FILE=str(config), ACM_SECRET_FILE=str(secret), ACM_LEDGER_FILE=str(ledger))
-    for provider, variable in [('OPENAI', 'OPENAI_API_KEY'), ('ANTHROPIC', 'ANTHROPIC_API_KEY')]:
+    for provider, variable in [('OPENAI', 'OPENAI_API_KEY'), ('ANTHROPIC', 'ANTHROPIC_API_KEY'),
+                               ('OPENAI_ADMIN', 'OPENAI_ADMIN_KEY')]:
         key = os.environ.pop(variable, None)
         if key is not None:
             if not key.strip():

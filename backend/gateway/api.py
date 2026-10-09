@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from .core import GatewayCore, GatewayError
 
 
-def create_app(core: GatewayCore, provider=None):
+def create_app(core: GatewayCore, provider=None, billing=None):
     @asynccontextmanager
     async def lifespan(app):
         try:
@@ -16,6 +16,8 @@ def create_app(core: GatewayCore, provider=None):
         finally:
             if provider is not None and hasattr(provider, 'aclose'):
                 await provider.aclose()
+            if billing is not None:
+                await billing.aclose()
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
     @app.exception_handler(GatewayError)
@@ -112,6 +114,15 @@ def create_app(core: GatewayCore, provider=None):
     async def costs(request: Request):
         auth(request)
         return await asyncio.to_thread(core.costs)
+
+    @app.get('/v1/billing/openai')
+    async def openai_billing(request: Request):
+        auth(request)
+        if billing is None:
+            return {'provider': 'openai', 'status': 'not_configured', 'balance': None,
+                    'balance_status': 'official_page_only', 'checked_at': int(core.clock()),
+                    'scope': 'organization', 'timezone': 'UTC'}
+        return await billing.summary()
 
     @app.post("/v1/quote")
     async def quote(request: Request):

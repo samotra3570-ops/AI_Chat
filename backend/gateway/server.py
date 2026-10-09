@@ -4,6 +4,7 @@ from pathlib import Path
 from .core import GatewayCore
 from .api import create_app
 from .provider import OpenAIResponsesProvider, AnthropicMessagesProvider, ProviderRouter
+from .billing import OpenAIBilling
 
 def create_server():
     config=json.loads(Path(os.environ['ACM_CONFIG_FILE']).read_text())
@@ -24,4 +25,7 @@ def create_server():
             for cfg in models.values()):
         raise ValueError('Invalid model provider configuration')
     provider = ProviderRouter(models, providers) if providers else None
-    return create_app(core,provider)
+    admin_file = os.environ.get('ACM_OPENAI_ADMIN_KEY_FILE')
+    admin_key = Path(admin_file).read_text().strip() if admin_file else os.environ.get('OPENAI_ADMIN_KEY')
+    billing = OpenAIBilling(admin_key, os.environ.get('ACM_OPENAI_BILLING_PROJECT_ID'))
+    return create_app(core, provider, billing)

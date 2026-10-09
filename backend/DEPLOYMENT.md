@@ -1,5 +1,9 @@
 # GPT·Claude 서버 배포
 
+## 0.3.9 Billing
+
+인증된 읽기 전용 OpenAI 비용 조회와 공식 Billing/Usage 링크를 추가했다. 자세한 범위·관리자 키·프로젝트 필터·시간 제한은 [BILLING.md](BILLING.md)를 따른다. 관리자 키가 없으면 GPT 연결을 그대로 유지하고 비용 조회만 `not_configured`로 표시한다. 현재 실제 크레딧 잔액의 자동 조회는 지원하지 않는다. 기존 모델·예산·원장·생성 키는 변경하지 않는다.
+
 ## 0.3.7 모델·예산 설정
 
 운영 서버는 `https://acm-gateway-production.up.railway.app`이다. 저장소 루트의 Dockerfile과 railway.toml을 사용하며 `/data/acm`의 원장·키를 재사용한다. 아래 초기 배포 설명은 역사적 준비 단계의 기록이다.
