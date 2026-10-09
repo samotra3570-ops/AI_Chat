@@ -4,6 +4,14 @@ import json
 import httpx
 from .core import GatewayError
 
+PROACTIVE_INSTRUCTION = (
+    'Runtime task: initiate a short, natural private message as this character. '
+    'There is no new user message. Use only the supplied real conversation and configured character state. '
+    'Do not invent a message, answer or action by the user, claim an event occurred, '
+    'or mention the task, scheduling, approval or API. Do not merely repeat your last message. '
+    'Return the same JSON messages object.'
+)
+
 
 class OpenAIResponsesProvider:
     """Explicitly configured adapter; no retries, redirects, tools or server-side conversation state."""
@@ -25,7 +33,10 @@ class OpenAIResponsesProvider:
         content = [{"type": "input_text", "text": payload["message"].get("text", "")}]
         if payload["message"].get("image_base64"):
             content.append({"type": "input_image", "image_url": "data:image/jpeg;base64," + payload["message"]["image_base64"], "detail": "low"})
-        inputs.append({"role": "user", "content": content})
+        if payload.get('purpose') == 'proactive':
+            inputs.append({'role': 'developer', 'content': PROACTIVE_INSTRUCTION})
+        else:
+            inputs.append({"role": "user", "content": content})
         body = {"model": payload["model"], "input": inputs, "store": False,
                 "max_output_tokens": limits["output_limit"], "tools": [],
                 "text": {"format": {"type": "json_schema", "name": "messages", "strict": True,
@@ -82,7 +93,9 @@ class AnthropicMessagesProvider:
                 "media_type": "image/jpeg", "data": payload["message"]["image_base64"]}})
         if payload["message"].get("text"):
             content.append({"type": "text", "text": payload["message"]["text"]})
-        messages.append({"role": "user", "content": content})
+        proactive = payload.get('purpose') == 'proactive'
+        # Claude의 마지막 user turn은 내부 작업 지시이며 실제 대화 원문에 저장하지 않는다.
+        messages.append({"role": "user", "content": [{'type': 'text', 'text': PROACTIVE_INSTRUCTION}] if proactive else content})
         body = {"model": payload["model"], "max_tokens": limits["output_limit"],
             "system": "Reply as the character in a normal private messenger. Do not expose model, token, configuration or memory-system terminology, and do not promise automatic memory writes. Use this character configuration. Style examples never happened; they are not memory or canon. Each output array item is one message. Newlines remain within that message. Return JSON only.\n" + configuration,
             "messages": messages, "tools": [],

@@ -184,7 +184,9 @@ def test_runtime_preserves_secret_ledger_config_and_keeps_keys_private(tmp_path,
     app = create_server()
     async def health():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://private.test') as client:
-            assert (await client.get('/health')).json() == {'status': 'ok'}
+            assert (await client.get('/health')).json() == {
+                'status': 'ok', 'features': {'proactive_generation': 1},
+            }
             assert (await client.get('/v1/models')).status_code == 400
         async with app.router.lifespan_context(app): pass
     asyncio.run(health())

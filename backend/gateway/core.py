@@ -201,8 +201,11 @@ class GatewayCore:
         return int(total.to_integral_value(rounding=ROUND_CEILING))
 
     def validate(self, payload):
-        if not isinstance(payload, dict) or set(payload) - {"request_id", "model", "room_id", "character_id", "message", "context", "history", "regenerate_of", "approved_micro_usd"}:
+        if not isinstance(payload, dict) or set(payload) - {"request_id", "model", "room_id", "character_id", "message", "context", "history", "regenerate_of", "approved_micro_usd", "purpose"}:
             raise GatewayError("invalid_payload")
+        purpose = payload.get('purpose', 'reply')
+        if purpose not in ('reply', 'proactive'):
+            raise GatewayError('invalid_purpose')
         for k in ("request_id", "room_id", "character_id", "model"):
             if not isinstance(payload.get(k), str) or not 1 <= len(payload[k]) <= 200:
                 raise GatewayError("invalid_payload")
@@ -223,7 +226,9 @@ class GatewayCore:
                     raise ValueError()
             except (TypeError, ValueError) as error:
                 raise GatewayError("invalid_image") from error
-        if not message.get("text", "").strip() and image is None:
+        if purpose == 'proactive' and (message.get('text', '') or image is not None or 'regenerate_of' in payload):
+            raise GatewayError('invalid_proactive_message')
+        if purpose != 'proactive' and not message.get("text", "").strip() and image is None:
             raise GatewayError("empty_message")
         if not isinstance(context, dict) or len(canonical(context).encode()) > 128000:
             raise GatewayError("invalid_context")
@@ -241,6 +246,8 @@ class GatewayCore:
         for message in history:
             if not isinstance(message, dict) or set(message) != {"role", "text"} or message["role"] not in ("user", "assistant") or not isinstance(message["text"], str) or len(message["text"]) > 4000:
                 raise GatewayError("invalid_history")
+        if purpose == 'proactive' and not any(m['role'] == 'user' and m['text'].strip() for m in history):
+            raise GatewayError('proactive_history_required')
 
     def _periods(self, now):
         instant = datetime.fromtimestamp(now, timezone.utc)
@@ -267,7 +274,8 @@ class GatewayCore:
         if estimate > cfg["max_input_tokens"]:
             raise GatewayError("context_too_large")
         reserve = self.charge(cfg, cfg["max_input_tokens"], cfg["max_output_tokens"])
-        return {"reserved_micro_usd": reserve, "input_limit": cfg["max_input_tokens"], "output_limit": cfg["max_output_tokens"], "model": payload["model"]}
+        return {"reserved_micro_usd": reserve, "input_limit": cfg["max_input_tokens"], "output_limit": cfg["max_output_tokens"], "model": payload["model"],
+                **({'purpose': 'proactive'} if payload.get('purpose') == 'proactive' else {})}
 
     def reserve(self, payload, subject="owner"):
         self.validate(payload)
