@@ -44,6 +44,8 @@ class GatewayCore:
             CREATE TABLE IF NOT EXISTS sessions(family TEXT PRIMARY KEY, access TEXT UNIQUE NOT NULL,
               access_expires REAL NOT NULL, refresh TEXT UNIQUE NOT NULL, refresh_expires REAL NOT NULL, revoked INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS refresh_history(hash TEXT PRIMARY KEY, family TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS owner_connection(id INTEGER PRIMARY KEY CHECK(id=1),
+              hash TEXT NOT NULL, revision INTEGER NOT NULL, updated REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS rate(bucket TEXT PRIMARY KEY, count INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS owner_settings(id INTEGER PRIMARY KEY CHECK(id=1),
               revision INTEGER NOT NULL, budgets TEXT NOT NULL);
@@ -122,6 +124,18 @@ class GatewayCore:
             db.execute("INSERT INTO pairing VALUES(?,?,0)", (self.digest(code), self.clock() + 600))
         return code
 
+    def configure_connection_code(self, code_hash):
+        # 운영자가 보관한 재사용 코드의 SHA256만 저장한다. 원문 코드는 받지 않는다.
+        if not isinstance(code_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", code_hash):
+            raise ValueError("Invalid reusable connection code digest")
+        with self.connection(write=True) as db:
+            row = db.execute("SELECT hash,revision FROM owner_connection WHERE id=1").fetchone()
+            if row and hmac.compare_digest(row["hash"], code_hash):
+                return
+            revision = row["revision"] + 1 if row else 1
+            db.execute("INSERT INTO owner_connection VALUES(1,?,?,?) ON CONFLICT(id) DO UPDATE SET hash=excluded.hash,revision=excluded.revision,updated=excluded.updated",
+                       (code_hash, revision, self.clock()))
+
     def _tokens(self, db, family, now):
         access, refresh = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
         db.execute("INSERT OR REPLACE INTO sessions VALUES(?,?,?,?,?,0)",
@@ -135,9 +149,16 @@ class GatewayCore:
             self._rate(db, "pair", subject, 5, now)
         with self.connection(write=True) as db:
             row = db.execute("SELECT * FROM pairing WHERE hash=?", (self.digest(code),)).fetchone()
-            if row is None or row["used"] or row["expires"] < now:
-                raise GatewayError("invalid_pairing", 401)
-            db.execute("UPDATE pairing SET used=1 WHERE hash=?", (self.digest(code),))
+            if row is not None and not row["used"] and row["expires"] >= now:
+                db.execute("UPDATE pairing SET used=1 WHERE hash=?", (self.digest(code),))
+            else:
+                # 같은 연결 API에서 재설치 복구 코드를 받아 새 기기 세션만 발급한다.
+                saved = db.execute("SELECT hash FROM owner_connection WHERE id=1").fetchone()
+                supplied = hashlib.sha256(code.encode()).hexdigest()
+                if (not re.fullmatch(r"acm_connect_[A-Za-z0-9_-]{43}", code)
+                        or saved is None or not hmac.compare_digest(saved["hash"], supplied)):
+                    raise GatewayError("invalid_pairing", 401)
+                self._rate(db, "connection", "owner", 20, now)
             return self._tokens(db, secrets.token_hex(16), now)
 
     def authenticate(self, access):

@@ -57,7 +57,7 @@ def create_app(core: GatewayCore, provider=None, billing=None):
 
     @app.get('/health')
     async def health():
-        return {'status': 'ok', 'features': {'proactive_generation': 1}}
+        return {'status': 'ok', 'features': {'proactive_generation': 1, 'reusable_connection': 1}}
 
     @app.post("/v1/pair")
     async def pair(request: Request):

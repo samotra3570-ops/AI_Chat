@@ -10,6 +10,9 @@ def create_server():
     config=json.loads(Path(os.environ['ACM_CONFIG_FILE']).read_text())
     secret=Path(os.environ['ACM_SECRET_FILE']).read_bytes()
     core=GatewayCore(os.environ['ACM_LEDGER_FILE'],secret,config)
+    connection_hash = os.environ.pop('ACM_CONNECTION_CODE_SHA256', None)
+    if connection_hash is not None:
+        core.configure_connection_code(connection_hash)
     providers = {}
     for name, adapter, variable in [
         ('openai', OpenAIResponsesProvider, 'ACM_OPENAI_KEY_FILE'),
